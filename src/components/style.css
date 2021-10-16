@@ -1,0 +1,8 @@
+.panel-container {
+  position: fixed;
+  right: 20px;
+  top: 20px;
+  background-color: black;
+  border-radius: 4px;
+  overflow: hidden;
+}

@@ -13,7 +13,6 @@ const App = () => {
         <ambientLight />
         <pointLight position={[50, 50, 50]} />
         <OrbitControls />
-
         <Plane />
         <Stats />
       </Canvas>

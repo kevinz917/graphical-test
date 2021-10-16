@@ -1,10 +1,11 @@
 console.clear();
 var scene = new THREE.Scene();
-var camera = new THREE.PerspectiveCamera(60, 1, 1, 1000);
+var camera = new THREE.PerspectiveCamera(55, 1, 1, 1000);
 camera.position.set(0, 0, 200);
 var renderer = new THREE.WebGLRenderer({
   antialias: true,
 });
+renderer.setClearColor(0x202020);
 var canvas = renderer.domElement;
 document.body.appendChild(canvas);
 
@@ -13,16 +14,14 @@ var controls = new THREE.OrbitControls(camera, canvas);
 var light = new THREE.DirectionalLight(0xffffff, 1);
 light.position.setScalar(100);
 scene.add(light);
-scene.add(new THREE.AmbientLight(0xffffff, 1));
+scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 
 var size = { x: 200, z: 200 };
 var radius = 100;
-var pointsCount = 500;
+var pointsCount = 250;
 var counter = 0;
 var points2d = [];
 var temp = new THREE.Vector2();
-
-// get 2d center points
 while (counter < pointsCount) {
   temp
     .random()
@@ -35,60 +34,48 @@ while (counter < pointsCount) {
 }
 
 var geom = new THREE.BufferGeometry().setFromPoints(points2d);
-var cloud = new THREE.Points(geom, new THREE.PointsMaterial({ color: 0x99ccff, size: 2 }));
+var cloud = new THREE.Points(
+  geom,
+  new THREE.PointsMaterial({
+    color: 0x99ccff,
+    size: 2,
+    onBeforeCompile: (shader) => {
+      console.log(shader.fragmentShader);
+      shader.fragmentShader = shader.fragmentShader.replace(
+        `#include <clipping_planes_fragment>`,
+        `
+          if (length(gl_PointCoord - 0.5) > 0.5) discard;
+          
+        #include <clipping_planes_fragment>`
+      );
+    },
+  })
+);
 scene.add(cloud);
 
-// voronoi generation
 var voronoi = new Voronoi();
 var bbox = { xl: -radius, xr: radius, yt: -radius, yb: radius };
 var diagram = voronoi.compute(points2d, bbox);
-console.log(diagram);
+console.log(diagram.cells[0]);
 
-var voronoiPoints = diagram.vertices;
-var voronoiPointsGeom = new THREE.BufferGeometry().setFromPoints(voronoiPoints);
-var voronoiPointsMat = new THREE.PointsMaterial({ color: "magenta", size: 3 });
-var voronoiPoints = new THREE.Points(voronoiPointsGeom, voronoiPointsMat);
-scene.add(voronoiPoints);
-
-var voronoiLinesPoints = [];
-var voronoiLinesColors = [];
-diagram.edges.forEach((ed) => {
-  if (Math.max(Math.hypot(ed.va.x, ed.va.y), Math.hypot(ed.vb.x, ed.vb.y)) < radius) {
-    voronoiLinesPoints.push(ed.va.x, ed.va.y, 0, ed.vb.x, ed.vb.y, 0, ed.va.x, ed.va.y, 10, ed.vb.x, ed.vb.y, 10);
-    voronoiLinesColors.push(1, 1, 0, 1, 1, 0, 0, 0.25, 0.25, 0, 0.25, 0.25);
+let vCells = [];
+let lineHolder = new THREE.Group();
+let cellHolder = new THREE.Group();
+scene.add(lineHolder, cellHolder);
+diagram.cells.forEach((cell) => {
+  let cellData = processCell(cell, radius);
+  if (cellData.isInside) {
+    buildTestContour(cellData);
+    buildHull(cellData, 10, 2);
   }
 });
-var voronoiLinesGeom = new THREE.BufferGeometry();
-voronoiLinesGeom.setAttribute("position", new THREE.Float32BufferAttribute(voronoiLinesPoints, 3));
-voronoiLinesGeom.setAttribute("color", new THREE.Float32BufferAttribute(voronoiLinesColors, 3));
-var voronoiLinesMat = new THREE.LineBasicMaterial({ vertexColors: true });
-var voronoiLines = new THREE.LineSegments(voronoiLinesGeom, voronoiLinesMat);
-scene.add(voronoiLines);
 
-var voronoiMeshPoints = [];
-var voronoiMeshIndex = [];
-var vIdx = 0;
-diagram.edges.forEach((ed) => {
-  if (Math.max(Math.hypot(ed.va.x, ed.va.y), Math.hypot(ed.vb.x, ed.vb.y)) < radius) {
-    voronoiMeshPoints.push(ed.va.x, ed.va.y, 0, ed.vb.x, ed.vb.y, 0, ed.va.x, ed.va.y, 10, ed.vb.x, ed.vb.y, 10);
-    voronoiMeshIndex.push(vIdx + 2, vIdx + 0, vIdx + 3, vIdx + 0, vIdx + 1, vIdx + 3);
-    vIdx += 4;
-  }
-});
-var voronoiMeshGeom = new THREE.BufferGeometry();
-voronoiMeshGeom.setAttribute("position", new THREE.Float32BufferAttribute(voronoiMeshPoints, 3));
-voronoiMeshGeom.setIndex(voronoiMeshIndex);
-voronoiMeshGeom.computeVertexNormals();
-let voronoiMeshMat = new THREE.MeshLambertMaterial({ color: 0x448888, side: THREE.DoubleSide });
-let voronoiMesh = new THREE.Mesh(voronoiMeshGeom, voronoiMeshMat);
-scene.add(voronoiMesh);
+var gui = new dat.GUI();
+gui.add(cloud, "visible").name("points");
+gui.add(lineHolder, "visible").name("lines");
+gui.add(cellHolder, "visible").name("cells");
 
-var gui = new dat.GUI({ width: 400 });
-gui.add(cloud, "visible").name("base points");
-gui.add(voronoiPoints, "visible").name("voronoi points");
-gui.add(voronoiLines, "visible").name("voronoi lines");
-gui.add(voronoiMesh, "visible").name("voronoi mesh");
-gui.add(voronoiMesh.material, "wireframe").name("voronoi mesh wireframe");
+let clock = new THREE.Clock();
 
 render();
 
@@ -108,6 +95,116 @@ function render() {
     camera.aspect = canvas.clientWidth / canvas.clientHeight;
     camera.updateProjectionMatrix();
   }
+
+  let t = clock.getElapsedTime();
+
+  vCells.forEach((c) => {
+    let phase = c.userData.initPhase + t;
+    let s = Math.sin(phase) * 0.5 + 0.5;
+    let scale = 0.1 + s * 0.9;
+    c.scale.setScalar(scale);
+  });
+
+  light.position.x = Math.cos(t) * 100;
+  light.position.y = Math.sin(t) * 100;
+
   renderer.render(scene, camera);
   requestAnimationFrame(render);
+}
+
+function buildHull(cd, height, lidShift) {
+  let basePoints = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+
+  let geomPoints = [];
+
+  for (let i = 0; i < cd.edgesCount; i++) {
+    basePoints[0].set(0, 0, 0);
+    basePoints[1].copy(cd.centeredPoints[i * 2 + 0]);
+    basePoints[2].copy(cd.centeredPoints[i * 2 + 1]);
+
+    if (isClockWise(basePoints)) {
+      basePoints[1].copy(cd.centeredPoints[i * 2 + 1]);
+      basePoints[2].copy(cd.centeredPoints[i * 2 + 0]);
+    }
+
+    // segment parts (top lid, bottom lid, side)
+    geomPoints.push(
+      // top lid
+      basePoints[0].clone().setZ(height + lidShift),
+      basePoints[1].clone().setZ(height),
+      basePoints[2].clone().setZ(height),
+      // bottom lid
+      basePoints[0].clone().setZ(-lidShift),
+      basePoints[2].clone(),
+      basePoints[1].clone(),
+      // side
+      basePoints[2].clone().setZ(height),
+      basePoints[1].clone().setZ(height),
+      basePoints[2].clone(),
+
+      basePoints[2].clone(),
+      basePoints[1].clone().setZ(height),
+      basePoints[1].clone()
+    );
+  }
+
+  let g = new THREE.BufferGeometry().setFromPoints(geomPoints);
+  g.computeVertexNormals();
+  let m = new THREE.MeshLambertMaterial({ color: Math.random() * 0xffffff });
+  let o = new THREE.Mesh(g, m);
+  o.position.copy(cd.center);
+  o.userData = {
+    initPhase: Math.random() * Math.PI * 2,
+  };
+  cellHolder.add(o);
+  vCells.push(o);
+}
+
+function buildTestContour(cd) {
+  let g = new THREE.BufferGeometry().setFromPoints(cd.contourPoints);
+  let m = new THREE.LineBasicMaterial({ color: "yellow" });
+  let l = new THREE.LineSegments(g, m);
+  lineHolder.add(l);
+}
+
+function processCell(cell, radius) {
+  let res = false;
+  let maxVal = 0;
+  let contourPoints = [];
+  cell.halfedges.forEach((he) => {
+    let a = he.edge.va;
+    let b = he.edge.vb;
+    let val = Math.max(Math.hypot(a.x, a.y), Math.hypot(b.x, b.y));
+    maxVal = Math.max(maxVal, val);
+    contourPoints.push(a, b);
+  });
+  let center = new THREE.Vector3(cell.site.x, cell.site.y, 0);
+  let basePoints = contourPoints.map((cp) => {
+    return new THREE.Vector3(cp.x, cp.y, 0);
+  });
+  let centeredPoints = basePoints.map((bp) => {
+    return bp.clone().sub(center);
+  });
+  return {
+    center: center,
+    contourPoints: basePoints,
+    centeredPoints: centeredPoints,
+    edgesCount: cell.halfedges.length,
+    isInside: maxVal <= radius,
+  };
+}
+
+function area(contour) {
+  const n = contour.length;
+  let a = 0.0;
+
+  for (let p = n - 1, q = 0; q < n; p = q++) {
+    a += contour[p].x * contour[q].y - contour[q].x * contour[p].y;
+  }
+
+  return a * 0.5;
+}
+
+function isClockWise(pts) {
+  return area(pts) < 0;
 }
