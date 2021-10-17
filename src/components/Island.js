@@ -1,36 +1,11 @@
-import React, { useRef, useState, useEffect } from "react";
-import { useSpring } from "@react-spring/three";
-import { useFrame } from "@react-three/fiber";
+import React, { useRef, useState, useEffect, Suspense } from "react";
+import { useLoader } from "react-three-fiber";
 import * as THREE from "three";
-import Voronoi from "voronoi";
 import { Noise } from "noisejs";
-import { processCell } from "./helper";
 import "./style.css";
+import { useTexture } from "@react-three/drei";
 
-function area(contour) {
-  const n = contour.length;
-  let a = 0.0;
-
-  for (let p = n - 1, q = 0; q < n; p = q++) {
-    a += contour[p].x * contour[q].y - contour[q].x * contour[p].y;
-  }
-
-  return a * 0.5;
-}
-
-function isClockWise(pts) {
-  return area(pts) < 0;
-}
-
-// constants
-var radius = 100;
-var pointsCount = 500;
-var temp = new THREE.Vector2();
-var all2DPoints = [];
-
-let voronoiMeshMat = new THREE.MeshLambertMaterial({ color: 0x2b2b2b, side: THREE.DoubleSide });
-
-const Plane = (props) => {
+const Plane = () => {
   const mesh = useRef();
   const [noiseMatrix, setNoiseMatrix] = useState([]);
   const [bottomRockMatrix, setBottomRockMatrix] = useState([]);
@@ -83,6 +58,19 @@ const Plane = (props) => {
     return Math.hypot(x2 - x1, y2 - y1);
   };
 
+  const heightSelector = (_noiseValue) => {
+    let multplier = 30;
+    if (_noiseValue > 0.5) multplier = 40;
+    return _noiseValue * multplier;
+  };
+
+  const water_texture = useTexture("assets/water_texture.jpeg");
+
+  const textureSelector = (_noiseValue) => {
+    const roundedVal = _noiseValue.toFixed(1);
+    if (roundedVal <= 0.2 && roundedVal >= 0.0) return <meshStandardMaterial map={water_texture} attach="material" />;
+  };
+
   return (
     <React.Fragment>
       {noiseMatrix.map((noiseArr, x) => {
@@ -90,9 +78,11 @@ const Plane = (props) => {
           return (
             <React.Fragment>
               {calcDistance(x * 5, y * 5, 50, 50) <= 50 ? (
-                <mesh position={[x * 5, y * 5, (noiseValue * 30) / 2]}>
-                  <boxGeometry args={[5, 5, noiseValue * 30]} />
+                <mesh position={[x * 5, y * 5, heightSelector(noiseValue) / 2]}>
+                  <boxGeometry args={[5, 5, heightSelector(noiseValue)]} />
                   <meshStandardMaterial color={depthColorSelector(noiseValue)} />
+
+                  {textureSelector(noiseValue)}
                 </mesh>
               ) : null}
             </React.Fragment>
@@ -107,7 +97,7 @@ const Plane = (props) => {
               {calcDistance(x * 5, y * 5, 50, 50) <= 50 ? (
                 <mesh position={[x * 5, y * 5, -(noiseValue * 20) / 2]}>
                   <boxGeometry args={[5, 5, noiseValue * 20]} />
-                  <meshStandardMaterial color="black" />
+                  <meshStandardMaterial color="#A0A291" />
                 </mesh>
               ) : null}
             </React.Fragment>

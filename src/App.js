@@ -1,19 +1,26 @@
-import React, { useEffect } from "react";
-import "./App.css";
-import Box from "./components/Box";
+import React, { Suspense } from "react";
+import * as THREE from "three";
 import { OrbitControls, Stats } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
-import NewBox from "./components/NewBox";
-import Plane from "./components/Plane";
+import Plane from "./components/Island";
+import Voronoi from "./components/Voronoi";
+import "./App.css";
 
 const App = () => {
   return (
     <React.Fragment>
-      <Canvas>
+      <Canvas
+        onCreated={({ gl, scene }) => {
+          scene.background = new THREE.Color("#080808");
+        }}
+      >
         <ambientLight />
         <pointLight position={[50, 50, 50]} />
         <OrbitControls />
-        <Plane />
+        <Suspense fallback={null}>
+          <Plane />
+        </Suspense>
+
         <Stats />
       </Canvas>
     </React.Fragment>
@@ -21,8 +28,3 @@ const App = () => {
 };
 
 export default App;
-
-// <NewBox />
-
-// <Box position={[-1.2, 0, 0]} />
-// <Box position={[1.2, 0, 0]} />
